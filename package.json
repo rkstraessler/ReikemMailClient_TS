@@ -1,0 +1,39 @@
+{
+  "name": "@reikem/mail-client",
+  "version": "1.0.6",
+  "packageManager": "bun@1.4.2",
+  "type": "module",
+  "main": "./dist/EmailAPIClient.js",
+  "types": "./dist/EmailAPIClient.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/EmailAPIClient.d.ts",
+      "import": "./dist/EmailAPIClient.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "clean": "bun -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true })\"",
+    "build": "bun run clean && bun x tsc",
+    "typecheck": "bun x tsc --noEmit",
+    "test": "bun test",
+    "check": "bun run typecheck && bun run test && bun run build && bun run pack:check",
+    "prepare": "bun run build",
+    "pack:check": "bun pm pack --dry-run"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "mime-types": "^3.0.2"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "@types/mime-types": "^3.0.1",
+    "@types/node": "^26.5.1"
+  }
+}

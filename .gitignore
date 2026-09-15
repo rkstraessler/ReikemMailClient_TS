@@ -1,0 +1,21 @@
+# Abhängigkeiten
+node_modules/
+
+# Lokale Umgebungsvariablen
+.env
+.env.local
+.env.*.local
+.npmrc
+
+# Testabdeckung
+coverage/
+.nyc_output/
+
+# IDEs und Editoren
+.idea/
+.vscode/
+
+# Betriebssystem-Dateien
+.DS_Store
+Thumbs.db
+dist/
