@@ -54,7 +54,7 @@ jobs:
       - name: Set package version from release tag
         env:
           PACKAGE_VERSION: ${{ steps.release.outputs.version }}
-        run: npm version "$PACKAGE_VERSION" --no-git-tag-version --ignore-scripts
+        run: npm version "$PACKAGE_VERSION" --no-git-tag-version --ignore-scripts --allow-same-version
 
       - name: Run checks and build
         run: bun run check
