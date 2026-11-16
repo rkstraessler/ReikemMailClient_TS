@@ -1,8 +1,11 @@
 {
   "name": "@reikem/mail-client",
-  "version": "1.0.6",
+  "version": "2.0.0",
   "packageManager": "bun@1.4.2",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "main": "./dist/EmailAPIClient.js",
   "types": "./dist/EmailAPIClient.d.ts",
   "sideEffects": false,
@@ -19,7 +22,7 @@
   "scripts": {
     "clean": "bun -e \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true })\"",
     "build": "bun run clean && bun x tsc",
-    "typecheck": "bun x tsc --noEmit",
+    "typecheck": "bun x tsc -p tsconfig.type-tests.json",
     "test": "bun test",
     "check": "bun run typecheck && bun run test && bun run build && bun run pack:check",
     "prepare": "bun run build",

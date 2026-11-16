@@ -1,100 +1,71 @@
-import { afterEach, mock } from 'bun:test'
+import { afterEach } from 'bun:test'
+import { createServer, type IncomingHttpHeaders, type Server } from 'node:http'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { EmailAPIClient } from '../../src/EmailAPIClient.ts'
-import type { FetchCall } from './email-api-client-test.types.ts'
+import { EmailAPIClient, type EmailAPIClientOptions, type SendMailOptions } from '../../src/EmailAPIClient.ts'
 
-const originalFetch = globalThis.fetch
-const temporaryDirectories = new Set<string>()
+export interface CapturedRequest { url: string; headers: IncomingHttpHeaders; body: Buffer }
+const servers = new Set<Server>()
+const directories = new Set<string>()
 
 afterEach(async () => {
-    globalThis.fetch = originalFetch
-
-    await Promise.all(
-        [...temporaryDirectories].map((directory) =>
-            rm(directory, { recursive: true, force: true }),
-        ),
-    )
-    temporaryDirectories.clear()
+    for (const server of servers) {
+        server.closeAllConnections()
+        await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+    servers.clear()
+    for (const directory of directories) await rm(directory, { recursive: true, force: true })
+    directories.clear()
 })
 
-export function createClient(): EmailAPIClient {
-    return new EmailAPIClient(
-        'https://mail.example.test/api/send/',
-        'test-auth-key',
-        'test-adapter-key',
-    )
+export function jsonResponse(body: unknown = { status: 200, data: { success: true } }, status = 200): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
-export function jsonResponse(body: unknown, status = 200): Response {
-    return new Response(JSON.stringify(body), {
-        status,
-        headers: {
-            'content-type': 'application/json',
-        },
+export async function localApi(handler: (request: CapturedRequest) => Response | Promise<Response> = () => jsonResponse()) {
+    const calls: CapturedRequest[] = []
+    const server = createServer(async (request, response) => {
+        try {
+            const chunks: Buffer[] = []
+            for await (const chunk of request) chunks.push(Buffer.from(chunk))
+            const captured = { url: request.url!, headers: request.headers, body: Buffer.concat(chunks) }
+            calls.push(captured)
+            const result = await handler(captured)
+            response.writeHead(result.status, Object.fromEntries(result.headers))
+            response.end(Buffer.from(await result.arrayBuffer()))
+        } catch {
+            response.writeHead(500)
+            response.end('test handler failed')
+        }
     })
+    servers.add(server)
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('No local port')
+    const baseUrl = `http://127.0.0.1:${address.port}`
+    const client = (options: Partial<EmailAPIClientOptions> = {}) => new EmailAPIClient({ baseUrl, authKey: 'test-auth', adapterKey: 'test-adapter', ...options })
+    return { calls, baseUrl, client, server }
 }
 
-export function installFetchMock(
-    responseFactory: () => Response,
-): FetchCall[] {
-    const calls: FetchCall[] = []
-    const fetchMock = mock(
-        async (
-            input: Parameters<typeof fetch>[0],
-            init?: RequestInit,
-        ): Promise<Response> => {
-            calls.push({ input, init })
-            return responseFactory()
-        },
-    )
-
-    globalThis.fetch = fetchMock as unknown as typeof fetch
-    return calls
+export function mail(overrides: Partial<SendMailOptions> = {}): SendMailOptions {
+    return { to: [{ email: 'user@example.com' }], subject: 'Subject', html: '<p>Content</p>', ...overrides }
 }
 
-export function getRequestFormData(call: FetchCall | undefined): FormData {
-    const body = call?.init?.body
-    if (!(body instanceof FormData)) {
-        throw new Error('Expected request body to be FormData')
-    }
+export function payload(call: CapturedRequest): any { return JSON.parse(call.body.toString('utf8')) }
 
-    return body
+export async function multipart(call: CapturedRequest): Promise<FormData> {
+    return new Request('http://localhost', { method: 'POST', headers: { 'content-type': call.headers['content-type']! }, body: call.body }).formData()
 }
 
-export async function createTemporaryDirectory(
-    prefix: string,
-): Promise<string> {
-    const directory = await mkdtemp(path.join(tmpdir(), prefix))
-    temporaryDirectories.add(directory)
-
+export async function createTemporaryDirectory(): Promise<string> {
+    const directory = await mkdtemp(path.join(tmpdir(), 'reikem-v2-'))
+    directories.add(directory)
     return directory
 }
 
-export async function createTemporaryFile(
-    filename: string,
-    content: string,
-): Promise<string> {
-    const directory = await createTemporaryDirectory(
-        'reikem-mail-client-test-',
-    )
-    const filePath = path.join(directory, filename)
+export async function createTemporaryFile(filename: string, content: string | Buffer): Promise<string> {
+    const filePath = path.join(await createTemporaryDirectory(), filename)
     await writeFile(filePath, content)
-
     return filePath
-}
-
-export async function captureError(promise: Promise<unknown>): Promise<Error> {
-    try {
-        await promise
-    } catch (error) {
-        if (error instanceof Error) {
-            return error
-        }
-
-        throw new Error('Expected an Error instance')
-    }
-
-    throw new Error('Expected promise to reject')
 }

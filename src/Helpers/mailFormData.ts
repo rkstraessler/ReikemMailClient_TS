@@ -1,86 +1,30 @@
-import { normalizeHistoryDate } from './historyNormalization.js'
-import { normalizeDelayUntil } from './mailNormalization.js'
-import type {
-    DelayUntil,
-    NormalizedPersonalizedEmailMessage,
-} from '../Types/email-domain.types.js'
-import type { HistoryDate } from '../Types/email-history.types.js'
+import { randomBytes } from 'node:crypto'
+import type { BinaryAttachment, NormalizedMail } from '../Types/email-domain.types.js'
 
-export function createAuthenticatedFormData(
-    config: string,
-    authKey: string,
-    adapterKey: string,
-): FormData {
-    const formData = new FormData()
-    formData.append('config', config)
-    formData.append('auth_key', authKey)
-    formData.append('adapter_key', adapterKey)
-    return formData
+export interface RequestBody { body: Buffer; contentType: string }
+
+export function encodeJson(payload: unknown): RequestBody {
+    return { body: Buffer.from(JSON.stringify(payload)), contentType: 'application/json' }
 }
 
-export function addRecipientsToFormData(
-    formData: FormData,
-    recipients: Record<string, string | null>,
-): void {
-    for (const [email, name] of Object.entries(recipients)) {
-        formData.append(`recipients[${email}]`, name ?? '')
-    }
-}
-
-export function addPersonalizedMessagesToFormData(
-    formData: FormData,
-    messages: Array<NormalizedPersonalizedEmailMessage>,
-): void {
-    for (const [index, message] of messages.entries()) {
-        formData.append(`messages[${index}][recipient]`, message.recipient)
-        formData.append(
-            `messages[${index}][recipient_name]`,
-            message.recipient_name ?? '',
-        )
-        formData.append(`messages[${index}][regard]`, message.regard)
-        formData.append(`messages[${index}][content]`, message.content)
-
-        if (message.delay_until !== null) {
-            formData.append(
-                `messages[${index}][delay_until]`,
-                normalizeDelayUntil(message.delay_until).toString(),
-            )
-        }
-    }
-}
-
-export function addDelayUntilToFormData(
-    formData: FormData,
-    delayUntil: DelayUntil,
-): void {
-    if (delayUntil === null) {
-        return
-    }
-
-    formData.append(
-        'delay_until',
-        normalizeDelayUntil(delayUntil).toString(),
-    )
-}
-
-export function addHistoryFiltersToFormData(
-    formData: FormData,
-    dateFrom: HistoryDate,
-    dateTo: HistoryDate,
-    messageIds: Array<number>,
-): void {
-    if (dateFrom !== null && dateFrom !== '') {
-        formData.append(
-            'dateFrom',
-            normalizeHistoryDate(dateFrom, 'dateFrom'),
-        )
-    }
-
-    if (dateTo !== null && dateTo !== '') {
-        formData.append('dateTo', normalizeHistoryDate(dateTo, 'dateTo'))
-    }
-
-    for (const [index, messageId] of messageIds.entries()) {
-        formData.append(`messageIds[${index}]`, messageId.toString())
-    }
+export function encodeMail(messages: NormalizedMail[], batch: boolean): RequestBody {
+    const uploads: BinaryAttachment[] = []
+    const expanded = messages.map(message => ({
+        ...message,
+        ...(message.attachments === undefined ? {} : { attachments: message.attachments.map(attachment => {
+            const uploadIndex = uploads.length
+            uploads.push(attachment)
+            return { filename: attachment.filename, contentType: attachment.contentType, uploadIndex }
+        }) }),
+    }))
+    const payload = batch ? { messages: expanded } : expanded[0]
+    if (!uploads.length) return encodeJson(payload)
+    const boundary = `rkmail-${randomBytes(24).toString('hex')}`
+    const quote = (value: string) => value.replace(/[\r\n"]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase())
+    const parts = [Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="payload"\r\n\r\n${JSON.stringify(payload)}\r\n`)]
+    uploads.forEach((attachment, index) => {
+        parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="attachments[${index}]"; filename="${quote(attachment.filename)}"\r\nContent-Type: ${attachment.contentType}\r\n\r\n`), Buffer.from(attachment.content), Buffer.from('\r\n'))
+    })
+    parts.push(Buffer.from(`--${boundary}--\r\n`))
+    return { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` }
 }

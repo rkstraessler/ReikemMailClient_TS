@@ -1,180 +1,74 @@
-import { EmailAttachment } from './EmailAttachment.js'
-import {
-    addDelayUntilToFormData,
-    addHistoryFiltersToFormData,
-    addPersonalizedMessagesToFormData,
-    addRecipientsToFormData,
-    createAuthenticatedFormData,
-} from './Helpers/mailFormData.js'
-import {
-    isValidEmail,
-    normalizePersonalizedMessages,
-    normalizeRecipientsMap,
-} from './Helpers/mailNormalization.js'
-import { normalizeHistoryMessageIds } from './Helpers/historyNormalization.js'
-import {
-    addAttachmentsToFormData,
-    createAttachments,
-    validateAttachments,
-} from './Helpers/attachmentFiles.js'
-import {
-    postApiRequest,
-    postDownloadRequest,
-} from './Services/emailApiTransport.service.js'
-import type {
-    ApiResponse,
-    DownloadResponse,
-} from './Types/email-client.types.js'
-import type {
-    DelayUntil,
-    PersonalizedEmailMessage,
-} from './Types/email-domain.types.js'
-import type {
-    HistoryDate,
-    HistoryMessageIds,
-} from './Types/email-history.types.js'
+import { createAttachments } from './Helpers/attachmentFiles.js'
+import { encodeJson, encodeMail } from './Helpers/mailFormData.js'
+import { normalizeBatch, normalizeMail } from './Helpers/mailNormalization.js'
+import { normalizeHistory } from './Helpers/historyNormalization.js'
+import { assertFields, positiveInteger } from './Helpers/validation.js'
+import { postApiRequest, postDownloadRequest } from './Services/emailApiTransport.service.js'
+import type { TransportOptions } from './Services/emailApiTransport.service.js'
+import type { ApiData, ApiResponse, BatchData, BatchResponse, DownloadResponse, EmailAPIClientOptions, SendData, SendResponse } from './Types/email-client.types.js'
+import type { SendMailOptions, SendPersonalizedMailBatchOptions } from './Types/email-domain.types.js'
+import type { DownloadFileOptions, GetMailHistoryOptions } from './Types/email-history.types.js'
 
 export class EmailAPIClient {
-    private readonly apiUrl: string
-    private readonly authKey: string
-    private readonly adapterKey: string
+    public static readonly MAX_FILTER_CONTEXT_CHARACTERS = 1000
+    private readonly endpointRoot: string
+    private readonly transport: TransportOptions
 
-    constructor(apiUrl: string, authKey: string, adapterKey: string) {
-        this.apiUrl = apiUrl.replace(/\/$/, '')
-        this.authKey = authKey
-        this.adapterKey = adapterKey
-    }
-
-    public async sendMail(
-        recipientEmail: string,
-        recipientName: string | null,
-        regard: string,
-        content: string,
-        attachments: Array<EmailAttachment> = [],
-        delayUntil: DelayUntil = null,
-    ): Promise<ApiResponse> {
-        if (!isValidEmail(recipientEmail)) {
-            throw new Error(`Invalid recipient email: ${recipientEmail}`)
+    constructor(options: EmailAPIClientOptions)
+    constructor(baseUrl: string, authKey: string, adapterKey: string)
+    constructor(options: EmailAPIClientOptions | string, authKey?: string, adapterKey?: string) {
+        const config: EmailAPIClientOptions = typeof options === 'string' ? { baseUrl: options, authKey: authKey!, adapterKey: adapterKey! } : options
+        assertFields(config, ['baseUrl', 'authKey', 'adapterKey', 'connectTimeout', 'requestTimeout'], 'constructor')
+        const connectTimeout = config.connectTimeout === undefined ? 10 : config.connectTimeout
+        const requestTimeout = config.requestTimeout === undefined ? 30 : config.requestTimeout
+        if (![connectTimeout, requestTimeout].every(n => Number.isSafeInteger(n) && n > 0 && n <= 2147483)) throw new Error('Timeouts must be positive integer seconds (at most 2147483)')
+        for (const key of ['authKey', 'adapterKey'] as const) {
+            if (typeof config[key] !== 'string' || !config[key] || /[^\x21-\x7E]/.test(config[key])) throw new Error(`Invalid ${key}`)
         }
-
-        return this.sendMailList(
-            { [recipientEmail]: recipientName },
-            regard,
-            content,
-            attachments,
-            delayUntil,
-        )
+        let url: URL
+        try {
+            if (typeof config.baseUrl !== 'string') throw new Error()
+            url = new URL(config.baseUrl)
+        } catch { throw new Error('Invalid Mail API URL') }
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('Invalid Mail API URL')
+        const prefix = url.pathname.replace(/\/+$/, '').replace(/\/api\/(?:v2\/)?send$/, '').replace(/\/api\/v2$/, '')
+        this.endpointRoot = `${url.origin}${prefix}/api/v2`
+        this.transport = { authKey: config.authKey as string, adapterKey: config.adapterKey as string, connectTimeout, requestTimeout }
     }
 
-    public async sendMailList(
-        recipients: Record<string, string | null | undefined>,
-        regard: string,
-        content: string,
-        attachments: Array<EmailAttachment> = [],
-        delayUntil: DelayUntil = null,
-    ): Promise<ApiResponse> {
-        const normalizedRecipients = normalizeRecipientsMap(recipients)
-        await validateAttachments(attachments)
-
-        const formData = this.createRequestFormData('email')
-        formData.append('regard', regard)
-        formData.append('content', content)
-
-        addRecipientsToFormData(formData, normalizedRecipients)
-        addDelayUntilToFormData(formData, delayUntil)
-        await addAttachmentsToFormData(formData, attachments)
-
-        return postApiRequest(this.apiUrl, formData)
+    public async sendMail(options: SendMailOptions): Promise<SendResponse> {
+        return postApiRequest<SendData>(`${this.endpointRoot}/send`, encodeMail([await normalizeMail(options)], false), this.transport)
     }
 
-    public async sendPersonalizedMailBatch(
-        messages: Array<PersonalizedEmailMessage>,
-        attachments: Array<EmailAttachment> = [],
-    ): Promise<ApiResponse> {
-        const normalizedMessages = normalizePersonalizedMessages(messages)
-        await validateAttachments(attachments)
-
-        const formData = this.createRequestFormData(
-            'email_batch_personalized',
-        )
-
-        addPersonalizedMessagesToFormData(formData, normalizedMessages)
-        await addAttachmentsToFormData(formData, attachments)
-
-        return postApiRequest(this.apiUrl, formData)
+    public async sendMailList(options: SendMailOptions): Promise<SendResponse> {
+        return this.sendMail(options)
     }
 
-    public async getMailHistory(
-        dateFrom: HistoryDate = null,
-        dateTo: HistoryDate = null,
-        messageIds: HistoryMessageIds = null,
-    ): Promise<ApiResponse> {
-        const normalizedMessageIds = normalizeHistoryMessageIds(messageIds)
-
-        if (dateFrom === null && normalizedMessageIds.length === 0) {
-            throw new Error(
-                'dateFrom is required when no messageIds are provided',
-            )
-        }
-
-        const formData = this.createRequestFormData('get_mail_history')
-        addHistoryFiltersToFormData(
-            formData,
-            dateFrom,
-            dateTo,
-            normalizedMessageIds,
-        )
-
-        return postApiRequest(this.apiUrl, formData)
+    public async sendPersonalizedMailBatch(options: SendPersonalizedMailBatchOptions): Promise<BatchResponse> {
+        return postApiRequest<BatchData>(`${this.endpointRoot}/send-batch`, encodeMail(await normalizeBatch(options), true), this.transport)
     }
 
-    public async downloadFile(
-        source: 'inbound' | 'outbound' | string,
-        fileId: number | string,
-        targetPath: string | null = null,
-    ): Promise<DownloadResponse | ApiResponse> {
-        const normalizedSource = source.toLowerCase().trim()
-        if (
-            normalizedSource !== 'inbound' &&
-            normalizedSource !== 'outbound'
-        ) {
-            throw new Error('source must be inbound or outbound')
-        }
-
-        const normalizedFileId =
-            typeof fileId === 'number' ? fileId : parseInt(fileId, 10)
-        if (isNaN(normalizedFileId) || normalizedFileId <= 0) {
-            throw new Error('Invalid fileId')
-        }
-
-        const formData = this.createRequestFormData('filedownload')
-        formData.append('source', normalizedSource)
-        formData.append('fileId', normalizedFileId.toString())
-
-        return postDownloadRequest(this.apiUrl, formData, targetPath)
+    public async getMailHistory(options: GetMailHistoryOptions): Promise<ApiResponse<ApiData>> {
+        return postApiRequest(`${this.endpointRoot}/history`, encodeJson(normalizeHistory(options)), this.transport)
     }
 
-    public async createAttachments(
-        paths: Array<string>,
-    ): Promise<Array<EmailAttachment>> {
-        return createAttachments(paths)
+    public async downloadFile(options: DownloadFileOptions): Promise<DownloadResponse | ApiResponse> {
+        assertFields(options, ['source', 'fileId', 'targetPath'], 'download')
+        const source = typeof options.source === 'string' ? options.source.trim().toLowerCase() : ''
+        if (source !== 'inbound' && source !== 'outbound') throw new Error('source must be inbound or outbound')
+        const fileId = positiveInteger(options.fileId, 'fileId')
+        const targetPath = options.targetPath ?? null
+        if (targetPath !== null && (typeof targetPath !== 'string' || !targetPath || targetPath.includes('\0'))) throw new Error('Invalid targetPath')
+        return postDownloadRequest(`${this.endpointRoot}/files/download`, encodeJson({ source, fileId }), this.transport, targetPath)
     }
 
-    private createRequestFormData(config: string): FormData {
-        return createAuthenticatedFormData(
-            config,
-            this.authKey,
-            this.adapterKey,
-        )
-    }
+    public createAttachments(paths: string[]) { return createAttachments(paths) }
 }
 
-export { EmailAttachment }
-export type {
-    ApiResponse,
-    DelayUntil,
-    DownloadResponse,
-    HistoryDate,
-    HistoryMessageIds,
-    PersonalizedEmailMessage,
-}
+export { EmailAttachment } from './EmailAttachment.js'
+export { createAttachments } from './Helpers/attachmentFiles.js'
+export { EmailAPITransportError } from './Services/emailApiTransport.service.js'
+export { MailStatus } from './Types/email-client.types.js'
+export type * from './Types/email-client.types.js'
+export type * from './Types/email-domain.types.js'
+export type * from './Types/email-history.types.js'
