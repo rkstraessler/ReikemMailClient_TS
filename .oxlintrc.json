@@ -1,0 +1,33 @@
+{
+    "$schema": "./node_modules/oxlint/configuration_schema.json",
+    "categories": {
+        "correctness": "error"
+    },
+    "ignorePatterns": [
+        "**/drizzle/**",
+        "**/dist/**",
+        "**/node_modules/**",
+        "**/coverage/**",
+        "**/.env",
+        "**/.env.*",
+        "**/*.gen.*",
+        "**/*.generated.*"
+    ],
+    "overrides": [
+        {
+            "files": [
+                "src/Helpers/validation.ts",
+                "src/Helpers/mailNormalization.ts"
+            ],
+            "rules": { "no-control-regex": "warn" }
+        },
+        {
+            "files": ["src/Services/emailApiTransport.service.ts"],
+            "rules": { "no-useless-escape": "warn" }
+        },
+        {
+            "files": ["test/EmailAPIClient/payload-construction.suite.ts"],
+            "rules": { "unicorn/no-new-array": "warn" }
+        }
+    ]
+}

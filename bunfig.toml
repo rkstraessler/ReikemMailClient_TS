@@ -1,0 +1,19 @@
+[fmt]
+tabWidth = 4
+semi = false
+singleQuote = true
+trailingComma = "all"
+ignorePatterns = [
+    "**/drizzle/**",
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/coverage/**",
+    "**/.env",
+    "**/.env.*",
+    "**/*.gen.*",
+    "**/*.generated.*",
+]
+
+[[fmt.overrides]]
+files = ["package.json", "tsconfig.json", "tsconfig.type-tests.json"]
+options = { tabWidth = 2 }
