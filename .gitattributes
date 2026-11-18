@@ -1,0 +1,4 @@
+# Keep files checked by Bun fmt consistent across operating systems.
+*.ts text eol=lf
+*.json text eol=lf
+bunfig.toml text eol=lf
