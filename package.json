@@ -5,7 +5,7 @@
     "type": "git",
     "url": "git+https://github.com/rkstraessler/ReikemMailClient_TS.git"
   },
-  "packageManager": "bun@1.4.2",
+  "packageManager": "bun@1.4.4",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -28,7 +28,11 @@
     "build": "bun run clean && bun x tsc",
     "typecheck": "bun x tsc -p tsconfig.type-tests.json",
     "test": "bun test",
-    "check": "bun run typecheck && bun run test && bun run build && bun run pack:check",
+    "lint": "oxlint src test .github/scripts",
+    "format": "bun --no-env-file .github/scripts/ci/format.ts fix",
+    "format:check": "bun --no-env-file .github/scripts/ci/format.ts check",
+    "test:automation": "bun test ./.github/scripts",
+    "check": "bun run lint && bun run format:check && bun run typecheck && bun run test && bun run test:automation && bun run pack:check",
     "prepare": "bun run build",
     "pack:check": "bun pm pack --dry-run"
   },
@@ -39,8 +43,9 @@
     "mime-types": "^3.0.2"
   },
   "devDependencies": {
-    "typescript": "^7.0.2",
     "@types/mime-types": "^3.0.1",
-    "@types/node": "^26.5.1"
+    "@types/node": "^26.5.1",
+    "oxlint": "^1.94.0",
+    "typescript": "^7.0.2"
   }
 }

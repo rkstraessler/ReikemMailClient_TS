@@ -1,0 +1,45 @@
+name: autofix.ci
+
+on:
+    pull_request:
+        branches: [main]
+
+permissions:
+    contents: read
+
+concurrency:
+    group: autofix-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+jobs:
+    autofix:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Check out the pull request head
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  ref: ${{ github.event.pull_request.head.sha }}
+                  fetch-depth: 0
+                  persist-credentials: false
+
+            - name: Set up Bun
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version-file: package.json
+
+            - name: Install locked dependencies without lifecycle scripts
+              run: bun --no-env-file install --frozen-lockfile --ignore-scripts
+
+            - name: Apply safe fixes to changed files
+              id: fix
+              env:
+                  FORMAT_BASE: ${{ github.event.pull_request.base.sha }}
+              run: bun --no-env-file run format
+
+            - name: Submit fixes for the pull request
+              if: steps.fix.outputs.changed == 'true'
+              uses: autofix-ci/action@c5b2d67aa2274e7b5a18224e8171550871fc7e4a # v1.3.4
+              with:
+                  commit-message: 'style: apply automatic lint and formatting fixes'
+                  fail-fast: false
