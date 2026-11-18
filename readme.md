@@ -1,31 +1,33 @@
-# REIKEM Mail Client für TypeScript
+# REIKEM Mail Client for TypeScript
 
-`@reikem/mail-client` ist das SDK für die REIKEM Mail API v2. Es validiert und kodiert Anfragen für den Mailversand, personalisierte Stapel, den Versandverlauf und Dateidownloads. Die API verwaltet Filterung, Warteschlange, Zustellung und Idempotenz.
+[![CI](https://github.com/rkstraessler/ReikemMailClient_TS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rkstraessler/ReikemMailClient_TS/actions/workflows/ci.yml)
 
-[npm-Paket](https://www.npmjs.com/package/@reikem/mail-client) · [GitHub-Releases](https://github.com/rkstraessler/ReikemMailClient_TS/releases) · [Fehler melden](https://github.com/rkstraessler/ReikemMailClient_TS/issues/new)
+`@reikem/mail-client` is the SDK for the REIKEM Mail API v2. It validates and encodes requests for sending email, sending personalized batches, querying mail history, and downloading files. The API handles filtering, queueing, delivery, and idempotency.
+
+[npm package](https://www.npmjs.com/package/@reikem/mail-client) · [GitHub releases](https://github.com/rkstraessler/ReikemMailClient_TS/releases) · [Report an issue](https://github.com/rkstraessler/ReikemMailClient_TS/issues/new)
 
 ## Installation
 
-Voraussetzungen sind Node.js 22+ oder Bun 1.4+ sowie die Basis-URL und die beiden Schlüssel einer REIKEM Mail API v2.
+You need Node.js 22+ or Bun 1.4+, a REIKEM Mail API v2 base URL, and both API keys.
 
 ```sh
 bun add @reikem/mail-client@^2
-# Alternativ mit npm
+# Or with npm
 npm install @reikem/mail-client@^2
 ```
 
-## Erste Mail versenden
+## Send your first email
 
 ```ts
-import { createAttachments, EmailAPIClient } from '@reikem/mail-client'
+import { EmailAPIClient } from '@reikem/mail-client'
 
 const { MAIL_AUTH_KEY, MAIL_ADAPTER_KEY } = process.env
 if (!MAIL_AUTH_KEY || !MAIL_ADAPTER_KEY) {
-    throw new Error('MAIL_AUTH_KEY und MAIL_ADAPTER_KEY sind erforderlich.')
+    throw new Error('MAIL_AUTH_KEY and MAIL_ADAPTER_KEY are required.')
 }
 
 const client = new EmailAPIClient({
-    baseUrl: 'https://mail.example.de/proxy',
+    baseUrl: 'https://mail.example.com/proxy',
     authKey: MAIL_AUTH_KEY,
     adapterKey: MAIL_ADAPTER_KEY,
     connectTimeout: 10,
@@ -33,69 +35,68 @@ const client = new EmailAPIClient({
 })
 
 const response = await client.sendMail({
-    to: [{ email: 'kunde@example.de', name: 'Erika Müller' }],
-    subject: 'Ihr Vertrag',
-    html: '<p>Anbei erhalten Sie Ihren Vertrag.</p>',
-    attachments: await createAttachments(['./Vertrag.pdf']),
-    idempotencyKey: 'vertrag:4711:v2:versand',
+    to: [{ email: 'customer@example.com', name: 'Alex Morgan' }],
+    subject: 'Your contract is ready',
+    html: '<p>Your contract is ready to review.</p>',
+    idempotencyKey: 'contract:4711:v2:ready',
 })
 
 console.log(response.httpCode, response.data)
 ```
 
-`baseUrl` akzeptiert eine Origin, ein Reverse-Proxy-Präfix oder eine URL mit `/api/send`, `/api/v2/send` oder `/api/v2`. Das SDK behält das Präfix bei und verwendet die v2-Endpunkte. Die Schlüssel gehen als `Authorization: Bearer …` und `X-Adapter-Key` an die API. Erlaubt sind druckbare ASCII-Zeichen von `0x21` bis `0x7E`.
+`baseUrl` accepts an origin, a reverse proxy prefix, or a URL ending in `/api/send`, `/api/v2/send`, or `/api/v2`. The SDK preserves the proxy prefix and calls the v2 endpoints. It sends the keys in the `Authorization: Bearer …` and `X-Adapter-Key` headers. Keys must contain printable ASCII characters from `0x21` through `0x7E`.
 
-Beide Zeitlimits sind positive ganze Sekunden bis 2.147.483. `connectTimeout` deckt den TCP-Aufbau und gegebenenfalls den TLS-Handshake ab. `requestTimeout` begrenzt die gesamte Anfrage einschließlich Antwortkörper.
+Both timeouts accept positive whole seconds up to 2,147,483. `connectTimeout` covers the TCP connection and any TLS handshake. `requestTimeout` covers the entire request, including the response body.
 
 ## API
 
-Alle Methoden nutzen `POST` relativ zum Proxy-Präfix.
+All methods use `POST` with paths relative to the proxy prefix.
 
-| Methode | Endpunkt | Verhalten |
+| Method | Endpoint | Behavior |
 | --- | --- | --- |
-| `sendMail(options)` und `sendMailList(options)` | `/api/v2/send` | Mehrere To-Adressen bilden eine gruppierte Mail mit einem Queue-Eintrag. |
-| `sendPersonalizedMailBatch(options)` | `/api/v2/send-batch` | Versendet bis zu 100 Nachrichten mit eigenen Empfängern, Inhalten und Ergebnissen. |
-| `getMailHistory(options)` | `/api/v2/history` | Fragt den Verlauf nach Zeitraum, Nachrichten-IDs oder beidem ab. |
-| `downloadFile(options)` | `/api/v2/files/download` | Liefert Dateiinhalte als `Buffer` oder schreibt sie an den angegebenen Zielpfad. |
+| `sendMail(options)` and `sendMailList(options)` | `/api/v2/send` | Multiple To recipients share one email and one queue entry. |
+| `sendPersonalizedMailBatch(options)` | `/api/v2/send-batch` | Sends up to 100 messages with individual recipients, content, and results. |
+| `getMailHistory(options)` | `/api/v2/history` | Looks up mail history by date range, message IDs, or both. |
+| `downloadFile(options)` | `/api/v2/files/download` | Returns a `Buffer` or writes the file to the requested path. |
 
-### Versandoptionen
+### Send options
 
-| Feld | Erwarteter Wert |
+| Option | Accepted value |
 | --- | --- |
-| `to`, `cc`, `bcc`, `replyTo` | Listen von `{ email, name? }`. `to` ist erforderlich und enthält mindestens einen Eintrag. To, CC und BCC erlauben jeweils bis zu 100 Einträge, Reply-To bis zu 10. |
-| `subject`, `html`, `text` | Betreff und HTML sind erforderlich. Der Betreff enthält bis zu 5.000 Unicode-Zeichen ohne Steuerzeichen. `text` ist optional. |
-| `attachments` | Bis zu 100 Anhänge pro Nachricht mit eindeutigem `filename`, `contentType` und `content` als `Buffer` oder `Uint8Array`. |
-| `filterContext` | Bis zu 1.000 Unicode-Zeichen oder `null`. CRLF und CR werden zu LF, Leerraum am Rand wird nach PHP-ASCII-Regeln getrimmt. |
-| `delayUntil` | `Date`, ganze Epochensekunden als Zahl oder String oder `null`. Gültige Werte liegen zwischen `1` und `253402300799`. |
-| `idempotencyKey` | Optionaler Geschäftsschlüssel mit 1 bis 255 Unicode-Zeichen ohne Steuerzeichen oder PHP-ASCII-Trim-Zeichen am Rand. |
+| `to`, `cc`, `bcc`, `replyTo` | Arrays of `{ email, name? }`. `to` requires at least one entry. To, Cc, and Bcc allow up to 100 entries each. Reply-To allows up to 10. |
+| `subject`, `html`, `text` | Subject and HTML are required. The subject allows up to 5,000 Unicode characters and excludes control characters. `text` is optional. |
+| `attachments` | Up to 100 attachments per message. Each has a unique `filename`, a `contentType`, and a `Buffer` or `Uint8Array` as `content`. |
+| `filterContext` | A string of up to 1,000 Unicode characters, or `null`. The SDK converts CRLF and CR to LF and applies PHP ASCII trimming. |
+| `delayUntil` | A `Date`, whole epoch seconds as a number or string, or `null`. Valid values range from `1` through `253402300799`. |
+| `idempotencyKey` | An optional business key of 1 to 255 Unicode characters. Control characters and leading or trailing PHP ASCII trim characters are invalid. |
 
-Das SDK normalisiert Adressen und behält bei Duplikaten die erste Adresse in der Reihenfolge To, CC, BCC. Reply-To wird separat dedupliziert. Internationale Domains werden als Punycode übergeben. Unbekannte Optionsfelder lösen einen Validierungsfehler aus.
+The SDK normalizes addresses and keeps the first occurrence of a duplicate in To, Cc, Bcc order. It deduplicates Reply-To separately. Use Punycode for international domains. Unknown option fields cause a validation error.
 
-`createAttachments(paths)` und `client.createAttachments(paths)` lesen Dateien als Binärdeskriptoren ein. Der v1-Adapter `EmailAttachment` wird weiterhin akzeptiert. Dateinamen dürfen bis zu 500 Unicode-Zeichen enthalten. `/`, `\`, `:` und Steuerzeichen sind unzulässig. Ohne Anhänge sendet das SDK JSON. Mit Anhängen sendet es Multipart mit `payload` und den Binärteilen `attachments[0]`, `attachments[1]` usw.
+`createAttachments(paths)` and `client.createAttachments(paths)` read files into binary attachment descriptors. The v1 `EmailAttachment` adapter remains supported. File names can contain up to 500 Unicode characters and exclude `/`, `\`, `:`, and control characters. Requests without attachments use JSON. Requests with attachments use multipart with a `payload` field and binary parts named `attachments[0]`, `attachments[1]`, and so on.
 
-### Idempotenz und Antworten
+### Idempotency and responses
 
-Bei identischem Schlüssel und normalisiertem Inhalt liefert die API den ursprünglichen Snapshot mit `replayed: true`. Bei geändertem Inhalt antwortet sie mit HTTP 409 und `code: 'idempotency_conflict'`. Ohne Schlüssel greift der serverseitige Hash-Duplikatfilter. Für den aktuellen Zustellstatus eignet sich `getMailHistory`.
+When the same key and normalized content are sent again, the API returns the original snapshot with `replayed: true`. Reusing the key with different content returns HTTP 409 and `code: 'idempotency_conflict'`. When the key is omitted, the server applies its hash-based duplicate filter. Use `getMailHistory` for the current delivery status.
 
-API-Antworten enthalten `{ status, data, httpCode }`. `httpCode` ist der HTTP-Status. Ein gültiger API-Fehler wird als Wert zurückgegeben. Netzwerkfehler werfen `EmailAPITransportError`, ungültige Eingaben, Antwortformate und Dateifehler werfen `Error`. Große numerische JSON-Werte bleiben als exakte Dezimalstrings erhalten. Das SDK führt einzelne Anfragen ohne Weiterleitungen oder Wiederholungen aus.
+API responses contain `{ status, data, httpCode }`, where `httpCode` is the HTTP status. Valid API errors arrive as response values. Network errors throw `EmailAPITransportError`. Invalid inputs, response formats, and file errors throw `Error`. Large JSON numbers are preserved as exact decimal strings. Each request runs without automatic redirects or retries.
 
-### Personalisierte Stapel
+### Personalized batches
 
 ```ts
 const batch = await client.sendPersonalizedMailBatch({
-    replyTo: [{ email: 'service@example.de' }],
-    bcc: [{ email: 'archiv@example.de' }],
+    replyTo: [{ email: 'support@example.com' }],
+    bcc: [{ email: 'archive@example.com' }],
     messages: [
         {
-            to: [{ email: 'erika@example.de', name: 'Erika Müller' }],
-            subject: 'Vertrag für Erika',
-            html: '<p>Guten Tag Frau Müller!</p>',
-            idempotencyKey: 'vertrag:4711:v2:versand',
+            to: [{ email: 'alex@example.com', name: 'Alex Morgan' }],
+            subject: 'Your contract',
+            html: '<p>Hello Alex, your contract is ready.</p>',
+            idempotencyKey: 'contract:4711:v2:send',
         },
         {
-            to: [{ email: 'max@example.de' }],
-            subject: 'Vertrag für Max',
-            html: '<p>Guten Tag Max!</p>',
+            to: [{ email: 'sam@example.com', name: 'Sam Wilson' }],
+            subject: 'Your contract',
+            html: '<p>Hello Sam, your contract is ready.</p>',
             bcc: [],
         },
     ],
@@ -106,9 +107,9 @@ for (const item of batch.data.results ?? []) {
 }
 ```
 
-Gemeinsame `attachments`, `filterContext`, `replyTo`, `cc` und `bcc` dienen als Vorgaben. Ein Nachrichtenfeld ersetzt seine Vorgabe vollständig. `[]` entfernt eine Liste, `null` entfernt den Filterkontext und `undefined` übernimmt die Vorgabe. Ein Stapel kann teils erfolgreiche und teils fehlgeschlagene Ergebnisse enthalten. `item.status` ist der jeweilige HTTP-Status.
+Shared `attachments`, `filterContext`, `replyTo`, `cc`, and `bcc` act as defaults. A message-level value replaces its default. Use `[]` to clear a list, `null` to clear the filter context, or `undefined` to inherit the default. A batch may contain successful and failed results. `item.status` is the HTTP status of that result.
 
-### Verlauf und Dateien abrufen
+### Mail history and downloads
 
 ```ts
 const history = await client.getMailHistory({
@@ -129,15 +130,15 @@ const file = await client.downloadFile({
 if ('success' in file && file.success) console.log(file.fileName, file.bytes)
 ```
 
-Beim Verlauf ist `dateFrom` erforderlich, wenn keine IDs vorliegen. Datumsangaben sind Kalenderdaten in `YYYY-MM-DD` oder `Date`-Objekte mit UTC-Auswertung. Mehrere IDs können als Liste oder kommagetrennter String übergeben werden. IDs jenseits von `Number.MAX_SAFE_INTEGER` werden als Strings übergeben.
+`dateFrom` is required when no message IDs are supplied. Dates use `YYYY-MM-DD` or the UTC calendar date of a `Date` object. Pass IDs as an array or a comma-separated string. Use strings for IDs above `Number.MAX_SAFE_INTEGER`.
 
-Beim Download verwendet ein Verzeichnis oder ein Pfad mit abschließendem Separator den Serverdateinamen. Sonst gilt `targetPath` als vollständiger Dateipfad. Das SDK entfernt Pfadanteile aus Serverdateinamen und erstellt fehlende Elternverzeichnisse. Ohne `targetPath` steht der `Buffer` in `file.content`.
+An existing directory or path ending in a separator uses the server file name. Other `targetPath` values specify the exact destination. The SDK strips path components from server file names and creates missing parent directories. Omit `targetPath` to receive the `Buffer` in `file.content`.
 
-### Migration von v1
+### Migrating from v1
 
-Versand, Verlauf und Downloads verwenden benannte Optionsobjekte. Versandfelder heißen `to`, `subject`, `html` und `delayUntil`. Adressfelder erhalten Listen von `{ email, name? }`. `createAttachments` liefert eingelesene Binärdeskriptoren. Der positionale Konstruktor und die Klasse `EmailAttachment` stehen für die Migration weiterhin zur Verfügung. Die exportierten Typen beschreiben die v2-Verträge. [Öffentliche Exporte](src/EmailAPIClient.ts)
+Send, history, and download methods take named options objects. Send fields use `to`, `subject`, `html`, and `delayUntil`. Address fields take arrays of `{ email, name? }`. `createAttachments` returns binary descriptors. The positional constructor and `EmailAttachment` remain available for migration. [Public exports](src/EmailAPIClient.ts)
 
-## Entwicklung
+## Development
 
 ```sh
 bun install --frozen-lockfile --ignore-scripts
@@ -145,19 +146,19 @@ bun run check
 bun audit --audit-level=high
 ```
 
-`bun run check` führt Oxlint, den Bun-Formatierungscheck, den Typecheck, die Tests, den Build und die Paketprüfung aus. Die HTTP- und TCP-Tests starten ihre eigenen lokalen Server. `bun run format` wendet sichere Oxlint-Fixes und Bun-Formatierung auf geänderte, von Git verfolgte Dateien an. Lokal gilt `HEAD` als Vergleichsbasis. In Pull Requests und bei Pushes auf `main` liefert GitHub die Basis für den Vergleich.
+`bun run check` runs Oxlint, the Bun format check, the TypeScript checks, tests, the build, and the package dry run. The HTTP and TCP tests start local servers. `bun run format` applies safe Oxlint fixes and Bun formatting to changed files tracked by Git. Locally it compares against `HEAD`. GitHub provides the comparison base for pull requests and pushes to `main`.
 
-### GitHub-Automatisierung
+### GitHub automation
 
-- **CI** prüft Pull Requests und Pushes auf `main`. `Package checks` und `Dependency security` sind die Pflichtprüfungen. Bun prüft die aufgelösten Abhängigkeiten täglich zusätzlich auf Sicherheitslücken ab Schweregrad `high`.
-- **Dependabot** aktualisiert npm-Pakete mit dem Bun-Updater für `bun.lock` und GitHub Actions täglich um 03:00 Uhr in `Europe/Berlin`. Reguläre Patch- und Minor-Updates werden pro Ökosystem gruppiert. Security-Updates laufen zusätzlich bei Advisories.
-- **Auto-Merge** ist für verifizierte Patch- und Minor-PRs vorgesehen. Bei Änderungen an `main` aktualisiert die Merge-App konfliktfreie Bot-Branches. Der aktualisierte Commit durchläuft erneut beide CI-Jobs. Die App reicht eine Freigabe für den geprüften Commit ein und fordert einen Squash-Merge mit genau dessen SHA an. Major-Updates und uneindeutige Updates durchlaufen ein manuelles Review.
-- **autofix.ci** korrigiert geänderte TypeScript-Dateien und ausgewählte Projektkonfigurationen auf dem PR-Branch. Ein Fix-Commit startet CI erneut. `.github`-Dateien werden von CI geprüft und sind von automatischen Fixes ausgeschlossen.
-- **Branch-Schutz** verlangt für `main` einen aktuellen Branch, ein genehmigendes Review und beide CI-Checks. GitHub verhindert Force-Pushes und Löschungen für reguläre Benutzer. Die Administratorrolle hat einen ausdrücklich konfigurierten Bypass. CODEOWNERS weist das Repository `@rkstraessler` zu. [Ruleset](.github/main-ruleset.json)
-- **Labels** kennzeichnen Ökosystem (`dependencies`, `typescript`, `github-actions`), Update-Typ (`patch`, `minor`, `major`, `security`) und Bearbeitung (`automerge`, `manual-review`, `autofix`). Die Projektlabels sind `bug`, `enhancement`, `documentation` und `maintenance`.
+- **CI** runs on pull requests and pushes to `main`. `Package checks` and `Dependency security` are required. A daily audit also checks the lockfile for high and critical advisories.
+- **Dependabot** checks npm dependencies via its Bun updater and GitHub Actions daily at 03:00 in `Europe/Berlin`. It groups routine patch and minor updates by ecosystem, and opens security PRs when advisories apply.
+- **Auto-merge** applies to verified patch and minor updates. The merge app updates conflict-free Dependabot branches when `main` advances. Both CI jobs must pass on the updated commit. The app submits a review and requests a squash merge for that exact SHA. Major and unclassified updates need manual review.
+- **autofix.ci** fixes changed TypeScript files and selected project configuration on the PR branch. A fix commit reruns CI. Files in `.github` are checked in CI and excluded from autofix.
+- **Branch protection** requires an up-to-date branch, one approving review, and both CI checks. The ruleset blocks force pushes and branch deletion for regular contributors. Repository administrators can bypass the rules. CODEOWNERS assigns ownership to `@rkstraessler`. [Ruleset](.github/main-ruleset.json)
+- **Labels** cover ecosystems (`dependencies`, `typescript`, `github-actions`), updates (`patch`, `minor`, `major`, `security`), automation (`automerge`, `manual-review`, `autofix`), and project work (`bug`, `enhancement`, `documentation`, `maintenance`).
 
-Für Autofix die offizielle [autofix.ci-App](https://github.com/apps/autofix-ci) für dieses Repository installieren. Für die Merge-Automatisierung eine GitHub App mit `Contents: read/write` und `Pull requests: read/write` ausschließlich für dieses Repository installieren. Für die App gelten die regulären Regeln für `main`. `DEPENDABOT_APP_CLIENT_ID` und `DEPENDABOT_APP_SLUG` sind Actions-Variablen. Der private Schlüssel gehört als `DEPENDABOT_APP_PRIVATE_KEY` in die nur für `main` freigegebene Umgebung `dependabot`. GitHubs allgemeine Review-Freigabe für Actions bleibt deaktiviert.
+Install the official [autofix.ci GitHub App](https://github.com/apps/autofix-ci) for this repository. For Dependabot merging, install a GitHub App with `Contents: read/write` and `Pull requests: read/write` scoped to this repository. The app follows the ordinary rules for `main`. Set the Actions variables `DEPENDABOT_APP_CLIENT_ID` and `DEPENDABOT_APP_SLUG`. Store the private key as `DEPENDABOT_APP_PRIVATE_KEY` in the `dependabot` environment, which is restricted to `main`. Keep the repository-wide GitHub Actions review permission disabled.
 
 ### Releases
 
-Ein veröffentlichtes GitHub-Release mit einem stabilen Tag `vMAJOR.MINOR.PATCH` löst die npm-Publikation aus. Der Tag muss auf einen Commit in der Historie von `main` zeigen. Der Workflow überprüft und baut den Tag-Commit, übernimmt die Paketversion aus dem Tag und veröffentlicht `@reikem/mail-client` über den bestehenden npm Trusted Publisher. Anschließend hängt er den Release-Banner an und bindet ihn in die vorhandenen Release Notes ein. [Release-Workflow](.github/workflows/npm-publish.yml)
+Publishing a GitHub release with a stable `vMAJOR.MINOR.PATCH` tag runs the npm release workflow. The tag must point to a commit in the history of `main`. The workflow checks and builds the tagged commit, sets the package version from the tag, and publishes `@reikem/mail-client` through the existing npm Trusted Publisher. It then attaches the banner and embeds it in the release notes. [Release workflow](.github/workflows/npm-publish.yml)
