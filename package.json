@@ -1,6 +1,10 @@
 {
   "name": "@reikem/mail-client",
   "version": "2.0.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rkstraessler/ReikemMailClient_TS.git"
+  },
   "packageManager": "bun@1.4.2",
   "type": "module",
   "engines": {
