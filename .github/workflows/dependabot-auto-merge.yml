@@ -1,4 +1,4 @@
-name: Dependabot Automation
+name: PR maintenance
 
 on:
     pull_request_target:
@@ -53,7 +53,7 @@ jobs:
               run: bun --no-env-file .github/scripts/security/dependabot.ts label
 
     reconcile:
-        name: Update, review and merge eligible Dependabot PRs
+        name: Maintain open pull requests
         if: >-
             github.repository == 'rkstraessler/ReikemMailClient_TS' &&
             github.ref == 'refs/heads/main' &&
@@ -62,7 +62,6 @@ jobs:
             vars.DEPENDABOT_APP_SLUG != '' &&
             (github.event_name != 'workflow_run' ||
              (github.event.workflow_run.event == 'pull_request' &&
-              github.event.workflow_run.conclusion == 'success' &&
               github.event.workflow_run.head_repository.full_name == github.repository))
         environment: dependabot
         concurrency:
@@ -78,7 +77,7 @@ jobs:
             - name: Check out trusted main automation
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
-                  ref: ${{ github.sha }}
+                  ref: refs/heads/main
                   persist-credentials: false
 
             - name: Set up Bun
@@ -93,10 +92,13 @@ jobs:
               with:
                   client-id: ${{ vars.DEPENDABOT_APP_CLIENT_ID }}
                   private-key: ${{ secrets.DEPENDABOT_APP_PRIVATE_KEY }}
+                  owner: ${{ github.repository_owner }}
+                  repositories: ${{ github.event.repository.name }}
                   permission-contents: write
                   permission-pull-requests: write
+                  permission-workflows: write
 
-            - name: Reconcile open Dependabot updates
+            - name: Update branches and reconcile Dependabot pull requests
               env:
                   GH_TOKEN: ${{ github.token }}
                   MERGE_APP_TOKEN: ${{ steps.app.outputs.token }}

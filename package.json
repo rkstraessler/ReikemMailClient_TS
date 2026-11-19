@@ -1,6 +1,14 @@
 {
   "name": "@reikem/mail-client",
   "version": "2.0.0",
+  "description": "TypeScript SDK for the REIKEM Mail API v2. Send email, submit personalized batches, query mail history, and download files.",
+  "keywords": [
+    "reikem-mail",
+    "email",
+    "email-api",
+    "mail-client",
+    "sdk"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rkstraessler/ReikemMailClient_TS.git"
