@@ -44,13 +44,21 @@ function stableVersion(value: unknown): [bigint, bigint, bigint] | undefined {
         return [BigInt(major), BigInt(minor), BigInt(patch)]
 }
 
-function semver(previous: unknown, next: unknown): UpdateLevel | undefined {
+function semver(previous: unknown, next: unknown) {
     const from = stableVersion(previous)
     const to = stableVersion(next)
     if (!from || !to) return undefined
-    if (to[0] !== from[0]) return to[0] > from[0] ? 'major' : undefined
-    if (to[1] !== from[1]) return to[1] > from[1] ? 'minor' : undefined
-    if (to[2] > from[2]) return 'patch'
+    if (to[0] !== from[0]) {
+        if (to[0] > from[0])
+            return { level: 'major', compatible: false } as const
+        return undefined
+    }
+    if (to[1] !== from[1]) {
+        if (to[1] > from[1])
+            return { level: 'minor', compatible: from[0] > 0n } as const
+        return undefined
+    }
+    if (to[2] > from[2]) return { level: 'patch', compatible: true } as const
 }
 
 export function readUpdate(message: string): UpdateMetadata {
@@ -71,44 +79,53 @@ export function readUpdate(message: string): UpdateMetadata {
     const security = entries.some(
         (entry: unknown) =>
             isRecord(entry) &&
-            (entry['dependency-group'] === 'security-updates' ||
-                entry['dependency-group'] === 'security-actions'),
+            typeof entry['dependency-group'] === 'string' &&
+            /^(?:security-updates|security-actions|(?:typescript|actions)-security(?:-compatible)?)$/.test(
+                entry['dependency-group'],
+            ),
     )
 
     const versions = Array.from(
-        message.matchAll(/^Updates `(\S+)` from (\S+) to (\S+)\s*$/gm),
+        message.matchAll(
+            /^Updates `([^`\s]+)` from `?([^`\s]+)`? to `?([^`\s]+)`?[ \t]*$/gm,
+        ),
     )
-    const single = /^Bumps .+ from (\S+) to (\S+)\.$/m.exec(message)
-    const levels = entries.map((entry: unknown) => {
+    const single =
+        /^Bumps .+ from `?([^`\s]+)`? to `?([^`\s]+)`?\.[ \t]*$/m.exec(message)
+    const changes = entries.map((entry: unknown) => {
         if (!isRecord(entry) || typeof entry['dependency-name'] !== 'string')
             return undefined
         const reported = entry['update-type']
         const version = versions.find(
             (update) => update[1] === entry['dependency-name'],
         )
-        const inferred = version
-            ? semver(version[2], version[3])
-            : entries.length === 1 && single
-              ? semver(single[1], single[2])
-              : undefined
-        // A confirmed major bump always wins, even if the metadata disagrees.
-        if (inferred === 'major') return inferred
-        if (
-            typeof reported === 'string' &&
-            Object.hasOwn(updateTypes, reported)
-        ) {
-            return updateTypes[reported as keyof typeof updateTypes]
+        const previous =
+            version?.[2] ?? (entries.length === 1 ? single?.[1] : undefined)
+        const next =
+            version?.[3] ?? (entries.length === 1 ? single?.[2] : undefined)
+        const inferred = semver(previous, next)
+        const declared =
+            typeof reported === 'string' && Object.hasOwn(updateTypes, reported)
+                ? updateTypes[reported as keyof typeof updateTypes]
+                : undefined
+        return {
+            level: inferred?.level ?? declared,
+            eligible:
+                inferred?.compatible === true &&
+                inferred.level === declared &&
+                next === entry['dependency-version'],
         }
-        return reported === undefined ? inferred : undefined
     })
     return {
         levels: Array.from(
-            new Set(levels.filter((level) => level !== undefined)),
+            new Set(
+                changes.flatMap((change) =>
+                    change?.level ? [change.level] : [],
+                ),
+            ),
         ),
         security,
-        eligible: levels.every(
-            (level) => level === 'patch' || level === 'minor',
-        ),
+        eligible: changes.every((change) => change?.eligible === true),
     }
 }
 

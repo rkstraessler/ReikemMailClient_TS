@@ -5,7 +5,7 @@ import type { UpdateMetadata } from './dependabot-metadata.ts'
 const dependabot = 'dependabot[bot]'
 const autofix = 'autofix-ci[bot]'
 const ciPath = '.github/workflows/ci.yml'
-const requiredJobs = ['Package checks', 'Dependency security']
+const requiredCheck = 'Required CI'
 const managedLabels = [
     'patch',
     'minor',
@@ -21,6 +21,7 @@ type Pull = {
     number: number
     state: string
     draft: boolean
+    title: string
     user: { login: string }
     base: Ref
     head: Ref
@@ -99,19 +100,24 @@ function sha(value: string): boolean {
     return /^[a-f0-9]{40}$/.test(value)
 }
 
+function localMainPull(pr: Pull, repository: string): boolean {
+    return (
+        pr.state === 'open' &&
+        !pr.draft &&
+        pr.base.ref === 'main' &&
+        pr.head.ref !== 'main' &&
+        pr.base.repo?.full_name === repository &&
+        pr.head.repo?.full_name === repository &&
+        sha(pr.head.sha) &&
+        sha(pr.base.sha)
+    )
+}
+
 function ecosystem(
     pr: Pull,
     repository: string,
 ): 'bun' | 'github_actions' | undefined {
-    if (
-        pr.state !== 'open' ||
-        pr.user.login !== dependabot ||
-        pr.base.ref !== 'main' ||
-        pr.base.repo?.full_name !== repository ||
-        pr.head.repo?.full_name !== repository ||
-        !sha(pr.head.sha) ||
-        !sha(pr.base.sha)
-    )
+    if (!localMainPull(pr, repository) || pr.user.login !== dependabot)
         return undefined
     if (pr.head.ref.startsWith('dependabot/bun/')) return 'bun'
     if (pr.head.ref.startsWith('dependabot/github_actions/'))
@@ -239,13 +245,11 @@ async function decide(
         validFiles(api, pr, kind),
     ])
     return {
-        verified: updates.length > 0 && scoped,
         eligible:
             updates.length > 0 &&
             scoped &&
             updates.every((update) => update.eligible) &&
-            !pr.draft &&
-            !pr.body?.includes('Maintainer changes'),
+            !needsManualReview(pr),
         levels: updates.flatMap((update) => update.levels),
         security:
             updates.some((update) => update.security) ||
@@ -254,6 +258,14 @@ async function decide(
                     pr.body ?? '',
                 )),
     }
+}
+
+function needsManualReview(pr: Pull): boolean {
+    return (
+        /^\w+(?:\([^\n]*\))?!:/.test(pr.title) ||
+        /maintainer changes/i.test(pr.body ?? '') ||
+        pr.labels.some((label) => label.name === 'breaking-change')
+    )
 }
 
 async function label(
@@ -346,14 +358,12 @@ async function ciPassed(
     const { jobs } = await api<{ jobs: Job[] }>(
         `actions/runs/${run.id}/attempts/${run.run_attempt}/jobs?per_page=100`,
     )
-    return requiredJobs.every((required) => {
-        const matches = jobs.filter((job) => job.name === required)
-        return (
-            matches.length === 1 &&
-            matches[0]?.status === 'completed' &&
-            matches[0]?.conclusion === 'success'
-        )
-    })
+    const matches = jobs.filter((job) => job.name === requiredCheck)
+    return (
+        matches.length === 1 &&
+        matches[0]?.status === 'completed' &&
+        matches[0]?.conclusion === 'success'
+    )
 }
 
 async function writeIfCurrent(
@@ -378,9 +388,9 @@ async function writeIfCurrent(
 
 function current(pr: Pull, previous: Pull, repository: string): boolean {
     return (
-        Boolean(ecosystem(pr, repository)) &&
-        !pr.draft &&
+        localMainPull(pr, repository) &&
         pr.mergeable === true &&
+        pr.head.ref === previous.head.ref &&
         pr.head.sha === previous.head.sha &&
         pr.base.sha === previous.base.sha
     )
@@ -399,13 +409,10 @@ export async function reconcile(
         api,
         'pulls?state=open&base=main',
     )) {
-        if (!ecosystem(summary, repository) || summary.draft) continue
+        if (!localMainPull(summary, repository)) continue
         const path = `pulls/${summary.number}`
         const pr = await api<Pull>(path)
-        const kind = ecosystem(pr, repository)
-        if (!kind || pr.draft || pr.mergeable !== true) continue
-        const decision = await decide(api, pr, kind, appLogin)
-        if (!decision.verified) continue
+        if (!localMainPull(pr, repository) || pr.mergeable !== true) continue
 
         const comparison = await api<Comparison>(
             `compare/${pr.base.sha}...${pr.head.sha}?per_page=1`,
@@ -417,10 +424,13 @@ export async function reconcile(
                 `${path}/update-branch`,
                 'PUT',
                 { expected_head_sha: pr.head.sha },
-                [409, 422],
+                [403, 404, 405, 409, 422],
             )
             continue
         }
+        const kind = ecosystem(pr, repository)
+        if (!kind) continue
+        const decision = await decide(api, pr, kind, appLogin)
         if (!decision.eligible || !(await ciPassed(api, pr, workflow))) continue
 
         const reviews = await api<Review[]>(`${path}/reviews?per_page=100`)
@@ -429,10 +439,7 @@ export async function reconcile(
                 review.user?.login === appLogin && review.state !== 'COMMENTED',
         )
         const fresh = await api<Pull>(path)
-        if (
-            !current(fresh, pr, repository) ||
-            fresh.body?.includes('Maintainer changes')
-        )
+        if (!current(fresh, pr, repository) || needsManualReview(fresh))
             continue
         if (
             ownReview?.state !== 'APPROVED' ||

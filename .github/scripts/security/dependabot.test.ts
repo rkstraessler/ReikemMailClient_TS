@@ -4,12 +4,24 @@ import { actionPinsOnly, readUpdate } from './dependabot-metadata.ts'
 import { reconcile } from './dependabot.ts'
 
 function dependabotMessage(...types: string[]): string {
+    const versions = types.map((type) =>
+        type.endsWith('-major')
+            ? '2.0.0'
+            : type.endsWith('-minor')
+              ? '1.5.0'
+              : '1.4.1',
+    )
     const dependencies = types.map(
         (type, index) =>
-            `- dependency-name: example-${index}\n  update-type: ${type}\n  dependency-group: security-updates`,
+            `- dependency-name: example-${index}\n  dependency-version: ${versions[index]}\n  update-type: ${type}\n  dependency-group: typescript-security-compatible`,
     )
     return [
         'chore(deps): bump dependencies',
+        '',
+        ...versions.map(
+            (version, index) =>
+                `Updates \`example-${index}\` from 1.4.0 to ${version}`,
+        ),
         '',
         '---',
         'updated-dependencies:',
@@ -50,12 +62,19 @@ test('classifies every dependency in a signed update, including grouped security
 })
 
 test('requires review for a major version even if upstream metadata reports a patch', () => {
-    const metadata = dependabotMessage('version-update:semver-patch')
-    const message = metadata.replace(
-        '\n\n',
-        '\n\nBumps example-0 from v1.9.9 to v2.0.0.\n\n',
+    const message = dependabotMessage('version-update:semver-major').replace(
+        'update-type: version-update:semver-major',
+        'update-type: version-update:semver-patch',
     )
     assert.deepEqual(readUpdate(message).levels, ['major'])
+    assert.equal(readUpdate(message).eligible, false)
+})
+
+test('requires review for a pre-1.0 minor update', () => {
+    const message = dependabotMessage('version-update:semver-minor')
+        .replace('from 1.4.0', 'from 0.4.0')
+        .replaceAll('1.5.0', '0.5.0')
+    assert.deepEqual(readUpdate(message).levels, ['minor'])
     assert.equal(readUpdate(message).eligible, false)
 })
 
@@ -99,6 +118,8 @@ async function reconcileFixture(scenario: Scenario = {}) {
         user: { login: scenario.author ?? bot },
         draft: false,
         state: 'open',
+        title: 'Update dependencies',
+        labels: [],
         head: { ref: headBranch, sha: head, repo: { full_name: repository } },
         base: { ref: 'main', sha: base, repo: { full_name: repository } },
         mergeable: !scenario.conflict,
@@ -161,12 +182,7 @@ async function reconcileFixture(scenario: Scenario = {}) {
             return {
                 jobs: [
                     {
-                        name: 'Package checks',
-                        status: 'completed',
-                        conclusion: 'success',
-                    },
-                    {
-                        name: 'Dependency security',
+                        name: 'Required CI',
                         status: 'completed',
                         conclusion: scenario.conclusion ?? 'success',
                     },
@@ -193,7 +209,7 @@ async function reconcileFixture(scenario: Scenario = {}) {
     return { writes, head }
 }
 
-test('reviews and squash-merges exactly the head that passed both CI jobs', async () => {
+test('reviews and squash-merges exactly the head that passed Required CI', async () => {
     const { writes, head } = await reconcileFixture()
     assert.deepEqual(writes, [
         {
@@ -210,7 +226,10 @@ test('reviews and squash-merges exactly the head that passed both CI jobs', asyn
 })
 
 test('updates a clean outdated branch and waits for checks on the new head', async () => {
-    const { writes, head } = await reconcileFixture({ behind: 1 })
+    const { writes, head } = await reconcileFixture({
+        behind: 1,
+        author: 'contributor',
+    })
     assert.deepEqual(writes, [
         {
             path: 'pulls/1/update-branch',
